@@ -32,6 +32,29 @@ static void handle_dragging(struct nk_context* ctx, Vector2* center, bool* isDra
     }
 }
 
+static void show_complex_path(float complex z, float complex c, int iterations, float aspectRatio, float screenWidth, float screenHeight, float zoom, Vector2 fractalArgandCenter) {
+    Vector2 previousScreenPos = { 0 };
+
+    for (int i = 0; i < iterations; i++) {
+        z = (z * z) + c;
+
+        float screenX = creal(z) - fractalArgandCenter.x;
+        float screenY = cimag(z) - fractalArgandCenter.y;
+        screenX /= aspectRatio * zoom;
+        screenY /= -1.0f * zoom;
+        screenX = screenWidth / 2.0f + screenX * screenWidth / 2.0f;
+        screenY = screenHeight / 2.0f - screenY * screenHeight / 2.0f;
+
+        DrawCircle(screenX, screenY, 2.0f, BLUE);
+
+        if (i > 0) {
+            DrawLineEx(previousScreenPos, (Vector2){ screenX, screenY }, 1.0f, RED);
+        }
+
+        previousScreenPos = (Vector2){ screenX, screenY };
+    }
+}
+
 int main(void)
 {
     int screenWidth = 1280;
@@ -65,6 +88,7 @@ int main(void)
     float fractalZoom = 2.0f;
     float juliaZoom = 2.0f;
     int iterations = 200;
+    bool isComplexPathShown = false;
     bool isJuliaModeEnabled = false;
     bool isJuliaSetFrozen = false;
 
@@ -120,8 +144,8 @@ int main(void)
 
         // Mouse argand location
         if (!isJuliaSetFrozen) {
-            float normX = (mouseScreenPos.x / screenWidth) * 2.0f - 1.0f;
-            float normY = (mouseScreenPos.y / screenHeight) * 2.0f - 1.0f;
+            float normX = (mouseScreenPos.x / (float)screenWidth) * 2.0f - 1.0f;
+            float normY = (mouseScreenPos.y / (float)screenHeight) * 2.0f - 1.0f;
             normX *= aspectRatio * (isJuliaModeEnabled ? juliaZoom : fractalZoom);
             normY *= (isJuliaModeEnabled ? juliaZoom : fractalZoom);
             mouseLocationArgand.x = fractalCenterArgand.x + normX * 0.5f;
@@ -148,6 +172,8 @@ int main(void)
             nk_layout_row_dynamic(ctx, 20, 1);
             nk_property_int(ctx, "Iterations", 10, &iterations, 1000, 10, 1.0f);
             nk_checkbox_label(ctx, "Julia Set", &isJuliaModeEnabled);
+            if (!isJuliaModeEnabled)
+                nk_checkbox_label(ctx, "Trace Complex Number Path", &isComplexPathShown);
             nk_label(ctx, "Centered at: ", NK_TEXT_LEFT);
             nk_label(ctx, "Mouse at: ", NK_TEXT_LEFT);
         }
@@ -166,7 +192,11 @@ int main(void)
         SetShaderValue(shader, juliaLoc, &temp, SHADER_UNIFORM_INT);
         DrawRectangleRec((Rectangle) { 0, 0, (float)screenWidth, (float)screenHeight }, WHITE);
         EndShaderMode();
-
+        
+        // Draw complex paths
+        if (isComplexPathShown && !isJuliaModeEnabled){
+            show_complex_path(0, mouseLocationArgand.x + mouseLocationArgand.y * I, 25, aspectRatio, screenWidth, screenHeight, fractalZoom, fractalCenterArgand);
+        }
         DrawNuklear(ctx);
         EndDrawing();
     }

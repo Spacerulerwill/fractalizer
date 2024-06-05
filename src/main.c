@@ -174,8 +174,20 @@ int main(void)
             nk_checkbox_label(ctx, "Julia Set", &isJuliaModeEnabled);
             if (!isJuliaModeEnabled)
                 nk_checkbox_label(ctx, "Trace Complex Number Path", &isComplexPathShown);
-            nk_label(ctx, "Centered at: ", NK_TEXT_LEFT);
-            nk_label(ctx, "Mouse at: ", NK_TEXT_LEFT);
+            char centeredAtText[128];
+            if (finalLocation.y < 0) {
+                snprintf(centeredAtText, sizeof(centeredAtText), "Centered at: %f - %fi", finalLocation.x, finalLocation.y * -1.0f);
+            } else {
+                snprintf(centeredAtText, sizeof(centeredAtText), "Centered at: %f + %fi", finalLocation.x, finalLocation.y);
+            }
+            char mouseAtText[128];
+            if (mouseLocationArgand.y < 0) {
+                snprintf(mouseAtText, sizeof(centeredAtText), "Mouse at: %f - %fi", mouseLocationArgand.x, mouseLocationArgand.y * -1.0f);
+            } else {
+                snprintf(mouseAtText, sizeof(centeredAtText), "Mouse at: %f + %fi", mouseLocationArgand.x, mouseLocationArgand.y);
+            }
+            nk_label(ctx, centeredAtText, NK_TEXT_LEFT);
+            nk_label(ctx, mouseAtText, NK_TEXT_LEFT);
         }
         nk_end(ctx);
 

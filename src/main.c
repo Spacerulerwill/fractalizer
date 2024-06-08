@@ -7,30 +7,17 @@
 #include <stdbool.h>
 #include <complex.h>
 
-static const float zoomSpeed = 1.1f;
+typedef enum {
+    RENDER_MODE_FRACTAL,
+    RENDER_MODE_JULIA_SET,
+    RENDER_MODE_FRACTAL_WITH_JULIA_SET_OVERLAY
+} RenderMode;
 
-static void handle_dragging(struct nk_context* ctx, Vector2* center, bool* isDragging, Vector2* dragStart, Vector2 mouseScreenPos, Vector2* offset, float screenWidth, float screenHeight, float aspectRatio, float zoom) {
-    if (!nk_window_is_any_hovered(ctx)) {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            *isDragging = true;
-            *dragStart = mouseScreenPos;
-        }
-    }
-    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        if (*isDragging) {
-            *offset = Vector2Subtract(*dragStart, GetMousePosition());
-            offset->x /= screenWidth / (aspectRatio * zoom);
-            offset->y /= screenHeight * -1.0f / zoom;
-        }
-    }
-    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-        if (*isDragging) {
-            *isDragging = false;
-            *center = Vector2Add(*center, *offset);
-            *offset = (Vector2){ 0.0f, 0.0f };
-        }
-    }
-}
+typedef enum {
+    FRACTAL_TYPE_MANDELBROT,
+    FRACTAL_TYPE_BURNING_SHIP,
+    FRACTAL_TYPE_TRICORN
+} FractalType;
 
 static void show_complex_path(float complex z, float complex c, int iterations, float aspectRatio, float screenWidth, float screenHeight, float zoom, Vector2 fractalArgandCenter) {
     Vector2 previousScreenPos = { 0 };
@@ -64,33 +51,35 @@ int main(void)
     // Raylib init
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(screenWidth, screenHeight, "Fractalizer");
-    Shader shader = LoadShader(0, "shader.fs");
-    int locationLoc = GetShaderLocation(shader, "location");
-    int mousePocLoc = GetShaderLocation(shader, "mousePos");
-    int zoomLoc = GetShaderLocation(shader, "zoom");
-    int resolutionLoc = GetShaderLocation(shader, "resolution");
-    int iterationsLoc = GetShaderLocation(shader, "iterations");
-    int juliaLoc = GetShaderLocation(shader, "isJuliaModeEnabled");
     SetTargetFPS(144);
+
+    // Shader loading plus shader uniform locations
+    Shader shader = LoadShader(0, "shader.fs");
+    int resolutionLoc = GetShaderLocation(shader, "resolution");
+    int fractalCenterArgandLoc = GetShaderLocation(shader, "fractalCenterArgand");
+    int fractalZoomLoc = GetShaderLocation(shader, "fractalZoom");
+    int juliaSetCenterArgandLoc = GetShaderLocation(shader, "juliaSetCenterArgand");
+    int juliaSetZoomLoc = GetShaderLocation(shader, "juliaSetZoom");
+    int juliaSetMousePosArgandLoc = GetShaderLocation(shader, "juliaSetMousePosArgand");
+    int fractalTypeLoc = GetShaderLocation(shader, "fractalType");
+    int renderModeLoc = GetShaderLocation(shader, "renderMode");
+    int iterationsLoc = GetShaderLocation(shader, "iterations");
+
+    // Fractal state
+    Vector2 fractalCenterArgand = { 0.0f, 0.0f };       
+    float fractalZoom = 2.0f;
+    Vector2 juliaSetCenterArgand = { 0.0f, 0.0f };
+    float juliaSetZoom = 2.0f;
+    Vector2 juliaSetMousePosArgand = { 0.0f, 0.0f };
+    FractalType fractalType = FRACTAL_TYPE_MANDELBROT;
+    RenderMode renderMode = RENDER_MODE_FRACTAL;
+    int iterations = 200;
+    bool isJuliaSetFrozen = false;
+    bool isComplexPathShown = false;
 
     // Nuklear init
     int fontSize = 10;
     struct nk_context* ctx = InitNuklear(fontSize);
-
-    // Dragging
-    Vector2 fractalCenterArgand = { 0.0f, 0.0f }; // Where fractal is currently centered on argand diagram
-    Vector2 juliaSetCenterArgand = { 0.0f, 0.0f };
-    Vector2 mouseLocationArgand = { 0.0f, 0.0f }; // Where the mouse is pointing on the argand diagram
-    Vector2 dragStart = { 0.0f, 0.0f }; // Where a drag started
-    Vector2 offset = { 0.0f, 0.0f }; // The current offset from the drag
-    bool isDragging = false;
-    // Fractal properties
-    float fractalZoom = 2.0f;
-    float juliaZoom = 2.0f;
-    int iterations = 200;
-    bool isComplexPathShown = false;
-    bool isJuliaModeEnabled = false;
-    bool isJuliaSetFrozen = false;
 
     // Main loop
     while (!WindowShouldClose())
@@ -100,69 +89,52 @@ int main(void)
         aspectRatio = (float)screenWidth / (float)screenHeight;
         Vector2 mouseScreenPos = GetMousePosition();
 
-        // Keybinds
-        // Toggle julia set mode
-        if (IsKeyPressed(KEY_J)) {
-            isDragging = false;
-            if (!isJuliaModeEnabled) {
-                fractalCenterArgand = Vector2Add(fractalCenterArgand, offset);
-                offset = (Vector2){ 0.0f, 0.0f }; // Reset offset
-            }
-            else {
-                juliaSetCenterArgand = Vector2Add(juliaSetCenterArgand, offset);
-                offset = (Vector2){ 0.0f, 0.0f }; // Reset offset
-            }
-            isJuliaModeEnabled = !isJuliaModeEnabled;
-        }
-        // Freeze julia set
-        if (isJuliaModeEnabled && IsKeyPressed(KEY_F)) {
-            isJuliaSetFrozen = !isJuliaSetFrozen;
-        }
-        if (IsKeyPressed(KEY_R)) {
-            isDragging = false;
-            if (isJuliaModeEnabled) {
-                juliaSetCenterArgand = (Vector2){ 0.0f, 0.0f };
-                juliaZoom = 2.0f;
-            }
-            else {
-                fractalCenterArgand = (Vector2){ 0.0f, 0.0f };
-                fractalZoom = 2.0f;
-            }
-            offset = (Vector2){ 0.0f, 0.0f };
-        }
+        // Calculate position of mouse cursor on argand diagram
+        float normX = ((mouseScreenPos.x / (float)screenWidth) * 2.0f - 1.0f) * aspectRatio * fractalZoom;
+        float normY = ((mouseScreenPos.y / (float)screenHeight) * 2.0f - 1.0f) * fractalZoom;
+        Vector2 mousePosArgand = { fractalCenterArgand.x + normX * 0.5f, fractalCenterArgand.y - normY * 0.5f };
 
-        // Dragging
-        if (!isJuliaModeEnabled) {
-            handle_dragging(ctx, &fractalCenterArgand, &isDragging, &dragStart, mouseScreenPos, &offset, (float)screenWidth, (float)screenHeight, aspectRatio, fractalZoom);
-        }
-        else if (isJuliaSetFrozen) {
-            handle_dragging(ctx, &juliaSetCenterArgand, &isDragging, &dragStart, mouseScreenPos, &offset, (float)screenWidth, (float)screenHeight, aspectRatio, juliaZoom);
-        }
+        BeginDrawing();
+        // Final fractal rendering
+        ClearBackground(RAYWHITE);
+        // Update all our shader uniforms and draw fractal
+        BeginShaderMode(shader);
+        SetShaderValue(shader, resolutionLoc, (int[2]) { screenWidth, screenHeight }, SHADER_UNIFORM_IVEC2);
+        SetShaderValue(shader, fractalCenterArgandLoc, &fractalCenterArgand, SHADER_UNIFORM_VEC2);
+        SetShaderValue(shader, fractalZoomLoc, &fractalZoom, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(shader, juliaSetCenterArgandLoc, &juliaSetCenterArgand, SHADER_UNIFORM_VEC2);
+        SetShaderValue(shader, juliaSetZoomLoc, &juliaSetZoom, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(shader, juliaSetMousePosArgandLoc, &juliaSetMousePosArgand, SHADER_UNIFORM_VEC2);
+        SetShaderValue(shader, fractalTypeLoc, &fractalType, SHADER_UNIFORM_INT);
+        SetShaderValue(shader, renderModeLoc, &renderMode, SHADER_UNIFORM_INT);
+        SetShaderValue(shader, iterationsLoc, &iterations, SHADER_UNIFORM_INT);
+        DrawRectangleRec((Rectangle) { 0, 0, (float)screenWidth, (float)screenHeight }, WHITE);
+        EndShaderMode();
 
-        // Fractal location
-        Vector2 finalLocation = Vector2Add(isJuliaModeEnabled ? juliaSetCenterArgand : fractalCenterArgand, offset);
-
-        // Mouse argand location
-        if (!isJuliaSetFrozen) {
-            float normX = (mouseScreenPos.x / (float)screenWidth) * 2.0f - 1.0f;
-            float normY = (mouseScreenPos.y / (float)screenHeight) * 2.0f - 1.0f;
-            normX *= aspectRatio * (isJuliaModeEnabled ? juliaZoom : fractalZoom);
-            normY *= (isJuliaModeEnabled ? juliaZoom : fractalZoom);
-            mouseLocationArgand.x = fractalCenterArgand.x + normX * 0.5f;
-            mouseLocationArgand.y = fractalCenterArgand.y - normY * 0.5f;
-        }
-
-        // Zoom with mouse wheel
-        float scrollDelta = GetMouseWheelMove();
-        if (scrollDelta != 0.0f) {
-            if (isJuliaModeEnabled) {
-                if (isJuliaSetFrozen) {
-                    juliaZoom *= scrollDelta > 0 ? 1.0f / zoomSpeed : zoomSpeed;
-                }
+        // Conditional stuff
+        if (renderMode == RENDER_MODE_FRACTAL) {
+            // switching to julia set mode
+            if (IsKeyPressed(KEY_J)) 
+                renderMode = RENDER_MODE_JULIA_SET;
+            // Tracing complex path
+            if (isComplexPathShown) {
+                show_complex_path(0, mousePosArgand.x + mousePosArgand.y * I, 25, aspectRatio, screenWidth, screenHeight, fractalZoom, fractalCenterArgand);
             }
-            else {
-                fractalZoom *= scrollDelta > 0 ? 1.0f / zoomSpeed : zoomSpeed;
-            }
+        } else {
+            // Switching back to fractal mode
+            if (IsKeyPressed(KEY_J)) 
+                renderMode = RENDER_MODE_FRACTAL;
+            // Switching to julia set with fractal set overlay
+            if (IsKeyPressed(KEY_TAB))
+                renderMode = RENDER_MODE_FRACTAL_WITH_JULIA_SET_OVERLAY;
+            else if (IsKeyReleased(KEY_TAB))
+                renderMode = RENDER_MODE_JULIA_SET;
+            // Freezing julia set
+            if (IsKeyPressed(KEY_F))
+                isJuliaSetFrozen = !isJuliaSetFrozen;
+            // Updating mouse position if julia set is not frozen
+            if (!isJuliaSetFrozen)
+                juliaSetMousePosArgand = mousePosArgand;
         }
 
         // GUI
@@ -171,44 +143,33 @@ int main(void)
             NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE)) {
             nk_layout_row_dynamic(ctx, 20, 1);
             nk_property_int(ctx, "Iterations", 10, &iterations, 1000, 10, 1.0f);
-            nk_checkbox_label(ctx, "Julia Set", &isJuliaModeEnabled);
-            if (!isJuliaModeEnabled)
-                nk_checkbox_label(ctx, "Trace Complex Number Path", &isComplexPathShown);
-            char centeredAtText[128];
-            if (finalLocation.y < 0) {
-                snprintf(centeredAtText, sizeof(centeredAtText), "Centered at: %f - %fi", finalLocation.x, finalLocation.y * -1.0f);
-            } else {
-                snprintf(centeredAtText, sizeof(centeredAtText), "Centered at: %f + %fi", finalLocation.x, finalLocation.y);
-            }
             char mouseAtText[128];
-            if (mouseLocationArgand.y < 0) {
-                snprintf(mouseAtText, sizeof(centeredAtText), "Mouse at: %f - %fi", mouseLocationArgand.x, mouseLocationArgand.y * -1.0f);
+            if (mousePosArgand.y < 0) {
+                snprintf(mouseAtText, sizeof(mouseAtText), "Mouse at: %f - %fi", mousePosArgand.x, mousePosArgand.y * -1.0f);
             } else {
-                snprintf(mouseAtText, sizeof(centeredAtText), "Mouse at: %f + %fi", mouseLocationArgand.x, mouseLocationArgand.y);
+                snprintf(mouseAtText, sizeof(mouseAtText), "Mouse at: %f + %fi", mousePosArgand.x, mousePosArgand.y);
             }
-            nk_label(ctx, centeredAtText, NK_TEXT_LEFT);
             nk_label(ctx, mouseAtText, NK_TEXT_LEFT);
+            
+            if (renderMode == RENDER_MODE_FRACTAL) {
+                nk_checkbox_label(ctx, "Trace Complex Number Path", &isComplexPathShown);
+                nk_label(
+                    ctx,
+                    "Controls:\n"
+                    "J - Toggle julia set",
+                    NK_LEFT
+                );
+            } else {
+                nk_label(
+                    ctx,
+                    "Controls:\n"
+                    "J - Toggle julia set\n"
+                    "TAB - Show fractal overlay",
+                    NK_LEFT
+                );
+            }
         }
         nk_end(ctx);
-
-        // Draw fractal
-        BeginDrawing();
-        ClearBackground(RAYWHITE);
-        BeginShaderMode(shader);
-        SetShaderValue(shader, locationLoc, &finalLocation, SHADER_UNIFORM_VEC2);
-        SetShaderValue(shader, resolutionLoc, (int[2]) { screenWidth, screenHeight }, SHADER_UNIFORM_IVEC2);
-        SetShaderValue(shader, zoomLoc, isJuliaModeEnabled ? &juliaZoom : &fractalZoom, SHADER_UNIFORM_FLOAT);
-        SetShaderValue(shader, iterationsLoc, &iterations, SHADER_UNIFORM_INT);
-        SetShaderValue(shader, mousePocLoc, &mouseLocationArgand, SHADER_UNIFORM_VEC2);
-        int temp = isJuliaModeEnabled ? 1 : 0;
-        SetShaderValue(shader, juliaLoc, &temp, SHADER_UNIFORM_INT);
-        DrawRectangleRec((Rectangle) { 0, 0, (float)screenWidth, (float)screenHeight }, WHITE);
-        EndShaderMode();
-        
-        // Draw complex paths
-        if (isComplexPathShown && !isJuliaModeEnabled){
-            show_complex_path(0, mouseLocationArgand.x + mouseLocationArgand.y * I, 25, aspectRatio, screenWidth, screenHeight, fractalZoom, fractalCenterArgand);
-        }
         DrawNuklear(ctx);
         EndDrawing();
     }

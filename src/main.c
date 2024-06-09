@@ -74,6 +74,7 @@ int main(void)
     FractalType fractalType = FRACTAL_TYPE_MANDELBROT;
     RenderMode renderMode = RENDER_MODE_FRACTAL;
     int iterations = 200;
+    bool isJuliaSetOn = false; // Only for the checkbox, julia set mode is handled by rendermode
     bool isJuliaSetFrozen = false;
     bool isComplexPathShown = false;
 
@@ -111,6 +112,45 @@ int main(void)
         DrawRectangleRec((Rectangle) { 0, 0, (float)screenWidth, (float)screenHeight }, WHITE);
         EndShaderMode();
 
+        // GUI
+        UpdateNuklear(ctx);
+        if (nk_begin(ctx, "Control Panel", nk_rect(10, 10, 220, 220),
+            NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE)) {
+            nk_layout_row_dynamic(ctx, 20, 1);
+            nk_property_int(ctx, "Iterations", 10, &iterations, 1000, 10, 1.0f);
+            char mouseAtText[128];
+            if (mousePosArgand.y < 0) {
+                snprintf(mouseAtText, sizeof(mouseAtText), "Mouse at: %f - %fi", mousePosArgand.x, mousePosArgand.y * -1.0f);
+            } else {
+                snprintf(mouseAtText, sizeof(mouseAtText), "Mouse at: %f + %fi", mousePosArgand.x, mousePosArgand.y);
+            }
+            nk_label(ctx, mouseAtText, NK_TEXT_LEFT);
+            if (nk_checkbox_label(ctx, "Julia Set", &isJuliaSetOn)) {
+                renderMode = isJuliaSetOn ? RENDER_MODE_JULIA_SET : RENDER_MODE_FRACTAL;
+            }
+            
+            if (renderMode == RENDER_MODE_FRACTAL) {
+                nk_checkbox_label(ctx, "Trace Complex Number Path", &isComplexPathShown);
+                nk_label(
+                    ctx,
+                    "Controls:\n"
+                    "J - Toggle julia set",
+                    NK_LEFT
+                );
+            } else {
+                nk_label(
+                    ctx,
+                    "Controls:\n"
+                    "J - Toggle julia set\n"
+                    "TAB - Show fractal overlay",
+                    NK_LEFT
+                );
+            }
+        }
+
+        nk_end(ctx);
+        DrawNuklear(ctx);
+
         // Conditional stuff
         if (renderMode == RENDER_MODE_FRACTAL) {
             // switching to julia set mode
@@ -136,41 +176,6 @@ int main(void)
             if (!isJuliaSetFrozen)
                 juliaSetMousePosArgand = mousePosArgand;
         }
-
-        // GUI
-        UpdateNuklear(ctx);
-        if (nk_begin(ctx, "Control Panel", nk_rect(10, 10, 220, 220),
-            NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE)) {
-            nk_layout_row_dynamic(ctx, 20, 1);
-            nk_property_int(ctx, "Iterations", 10, &iterations, 1000, 10, 1.0f);
-            char mouseAtText[128];
-            if (mousePosArgand.y < 0) {
-                snprintf(mouseAtText, sizeof(mouseAtText), "Mouse at: %f - %fi", mousePosArgand.x, mousePosArgand.y * -1.0f);
-            } else {
-                snprintf(mouseAtText, sizeof(mouseAtText), "Mouse at: %f + %fi", mousePosArgand.x, mousePosArgand.y);
-            }
-            nk_label(ctx, mouseAtText, NK_TEXT_LEFT);
-            
-            if (renderMode == RENDER_MODE_FRACTAL) {
-                nk_checkbox_label(ctx, "Trace Complex Number Path", &isComplexPathShown);
-                nk_label(
-                    ctx,
-                    "Controls:\n"
-                    "J - Toggle julia set",
-                    NK_LEFT
-                );
-            } else {
-                nk_label(
-                    ctx,
-                    "Controls:\n"
-                    "J - Toggle julia set\n"
-                    "TAB - Show fractal overlay",
-                    NK_LEFT
-                );
-            }
-        }
-        nk_end(ctx);
-        DrawNuklear(ctx);
         EndDrawing();
     }
 
